@@ -46,6 +46,7 @@ class ReflectionClosure extends ReflectionFunction
     /**
      * @return bool
      */
+    #[\ReturnTypeWillChange]
     public function isStatic()
     {
         if ($this->isStaticClosure === null) {

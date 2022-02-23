@@ -109,12 +109,7 @@ class SerializableClosure implements Serializable
         return call_user_func_array($this->closure, func_get_args());
     }
 
-    /**
-     * Implementation of Serializable::serialize()
-     *
-     * @return  string  The serialized closure
-     */
-    public function serialize()
+    public function __serialize(): array
     {
         if ($this->scope === null) {
             $this->scope = new ClosureScope();
@@ -147,13 +142,23 @@ class SerializableClosure implements Serializable
 
         $this->mapByReference($use);
 
-        $ret = \serialize(array(
+        return array(
             'use' => $use,
             'function' => $code,
             'scope' => $scope,
             'this' => $object,
             'self' => $this->reference,
-        ));
+        );
+    }
+
+    /**
+     * Implementation of Serializable::serialize()
+     *
+     * @return  string  The serialized closure
+     */
+    public function serialize()
+    {
+        $ret = \serialize($this->__serialize());
 
         if (static::$securityProvider !== null) {
             $data = static::$securityProvider->sign($ret);
@@ -176,6 +181,37 @@ class SerializableClosure implements Serializable
     protected function transformUseVariables($data)
     {
         return $data;
+    }
+
+    public function __unserialize($data)
+    {
+        $this->code = $data;
+        
+        $this->code['objects'] = array();
+
+        if ($this->code['use']) {
+            $this->scope = new ClosureScope();
+            $this->code['use'] = $this->resolveUseVariables($this->code['use']);
+            $this->mapPointers($this->code['use']);
+            extract($this->code['use'], EXTR_OVERWRITE | EXTR_REFS);
+            $this->scope = null;
+        }
+
+        $this->closure = include(ClosureStream::STREAM_PROTO . '://' . $this->code['function']);
+
+        if($this->code['this'] === $this){
+            $this->code['this'] = null;
+        }
+
+        $this->closure = $this->closure->bindTo($this->code['this'], $this->code['scope']);
+
+        if(!empty($this->code['objects'])){
+            foreach ($this->code['objects'] as $item){
+                $item['property']->setValue($item['instance'], $item['object']->getClosure());
+            }
+        }
+
+        $this->code = $this->code['function'];
     }
 
     /**
@@ -239,36 +275,7 @@ class SerializableClosure implements Serializable
             $data = $data['closure'];
         }
 
-        $this->code = \unserialize($data);
-
-        // unset data
-        unset($data);
-
-        $this->code['objects'] = array();
-
-        if ($this->code['use']) {
-            $this->scope = new ClosureScope();
-            $this->code['use'] = $this->resolveUseVariables($this->code['use']);
-            $this->mapPointers($this->code['use']);
-            extract($this->code['use'], EXTR_OVERWRITE | EXTR_REFS);
-            $this->scope = null;
-        }
-
-        $this->closure = include(ClosureStream::STREAM_PROTO . '://' . $this->code['function']);
-
-        if($this->code['this'] === $this){
-            $this->code['this'] = null;
-        }
-
-        $this->closure = $this->closure->bindTo($this->code['this'], $this->code['scope']);
-
-        if(!empty($this->code['objects'])){
-            foreach ($this->code['objects'] as $item){
-                $item['property']->setValue($item['instance'], $item['object']->getClosure());
-            }
-        }
-
-        $this->code = $this->code['function'];
+        $this->__unserialize(\unserialize($data));
     }
 
     /**
